@@ -1,0 +1,28 @@
+[project]
+name = "redifind"
+version = "0.1.0"
+description = "Redis-backed ranked search for your workspace"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "redis>=5.0",
+  "rich>=13.7",
+  "typer>=0.12",
+  "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+redifind = "redifind.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
