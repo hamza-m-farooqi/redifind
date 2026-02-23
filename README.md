@@ -129,6 +129,7 @@ Options:
 - `--include <glob...>`: include patterns (repeatable)
 - `--exclude <glob...>`: exclude patterns (repeatable)
 - `--max-bytes <n>`: skip very large files (default: 2_000_000)
+- binary files are auto-skipped via byte sampling (NUL/control-byte heuristic)
 - `--redis <url>`: Redis URL (default: redis://localhost:6379/0)
 - `--prefix <ns>`: namespace prefix for all keys (default: rsearch:)
 - `--drop`: drop existing index namespace before indexing
