@@ -131,3 +131,36 @@ def test_index_missing_paths_errors_json(monkeypatch):
     assert payload["ok"] is False
     assert payload["error"] == "No input paths exist."
     assert payload["missing_paths"]
+
+
+def test_prune_dry_run_json(monkeypatch):
+    monkeypatch.setattr("redifind.cli.ensure_redis_ready", lambda redis_url: None)
+    monkeypatch.setattr("redifind.cli.get_client", lambda redis_url: object())
+    monkeypatch.setattr(
+        "redifind.cli.list_missing_docs",
+        lambda client, root, prefix: [Path("/tmp/missing-1.py"), Path("/tmp/missing-2.md")],
+    )
+
+    result = runner.invoke(app, ["prune", "/tmp", "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "prune"
+    assert payload["dry_run"] is True
+    assert payload["would_remove_docs"] == 2
+    assert len(payload["documents"]) == 2
+
+
+def test_prune_json_marks_non_dry_run(monkeypatch):
+    monkeypatch.setattr("redifind.cli.ensure_redis_ready", lambda redis_url: None)
+    monkeypatch.setattr("redifind.cli.get_client", lambda redis_url: object())
+    monkeypatch.setattr("redifind.cli.list_missing_docs", lambda client, root, prefix: [])
+    monkeypatch.setattr("redifind.cli.prune_missing", lambda client, root, prefix: 3)
+
+    result = runner.invoke(app, ["prune", "/tmp", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "prune"
+    assert payload["dry_run"] is False
+    assert payload["removed_docs"] == 3

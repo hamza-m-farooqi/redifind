@@ -4,7 +4,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from redis import Redis
 
@@ -82,6 +82,7 @@ def index_paths(
     exclude: Sequence[str],
     max_bytes: int,
     prefix: str,
+    on_file_processed: Callable[[Path, bool], None] | None = None,
 ) -> int:
     prefix = normalize_prefix(prefix)
     indexed = 0
@@ -100,8 +101,12 @@ def index_paths(
         try:
             data = path.read_bytes()
         except OSError:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
             continue
         if _looks_binary(data):
+            if on_file_processed is not None:
+                on_file_processed(path, False)
             continue
 
         text = None
@@ -128,6 +133,8 @@ def index_paths(
 
         total_terms = sum(tokens.values())
         if total_terms == 0:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
             continue
 
         pipe = client.pipeline()
@@ -159,7 +166,24 @@ def index_paths(
 
         pipe.execute()
         indexed += 1
+        if on_file_processed is not None:
+            on_file_processed(path, True)
     return indexed
+
+
+def list_missing_docs(client: Redis, root: Path, prefix: str) -> list[Path]:
+    prefix = normalize_prefix(prefix)
+    root_resolved = root.resolve()
+    indexed_key = _indexed_key(prefix)
+    doc_ids = client.smembers(indexed_key)
+    missing: list[Path] = []
+    for doc_id in doc_ids:
+        doc_path = Path(doc_id)
+        if not doc_id.startswith(str(root_resolved)):
+            continue
+        if not doc_path.exists():
+            missing.append(doc_path)
+    return missing
 
 
 def remove_docs(client: Redis, paths: Sequence[Path], prefix: str) -> int:
@@ -183,15 +207,7 @@ def remove_docs(client: Redis, paths: Sequence[Path], prefix: str) -> int:
 
 
 def prune_missing(client: Redis, root: Path, prefix: str) -> int:
-    prefix = normalize_prefix(prefix)
-    indexed_key = _indexed_key(prefix)
-    doc_ids = client.smembers(indexed_key)
-    missing: list[Path] = []
-    for doc_id in doc_ids:
-        if not doc_id.startswith(str(root.resolve())):
-            continue
-        if not Path(doc_id).exists():
-            missing.append(Path(doc_id))
+    missing = list_missing_docs(client, root, prefix)
     if not missing:
         return 0
     return remove_docs(client, missing, prefix)

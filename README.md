@@ -135,6 +135,10 @@ Options:
 - `--drop`: drop existing index namespace before indexing
 - `--json`: output structured JSON
 
+Notes:
+- human output now shows a Rich progress bar while indexing
+- when `--drop` is set, drop progress is shown before indexing starts
+
 Examples:
 
 ```bash
@@ -193,6 +197,7 @@ Notes:
 Remove documents from the index (by file path).
 
 Options:
+- `--dry-run`: preview which missing docs would be removed without deleting
 - `--json`: output structured JSON
 - `--size-unit <auto|bytes|kb|mb|gb>`: choose size display units for indexed/Redis memory values
 

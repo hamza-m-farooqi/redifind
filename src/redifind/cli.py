@@ -8,15 +8,16 @@ import typer
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from .config import IndexConfig, QueryConfig, WatchConfig
-from .indexer import drop_namespace, index_paths, index_stats, prune_missing, remove_docs
+from .indexer import drop_namespace, index_paths, index_stats, list_missing_docs, prune_missing, remove_docs
 from .preflight import ensure_redis_ready, get_preflight_status
 from .query import run_query, run_query_explain
 from .redis_client import get_client
 from .snippets import snippet_for
-from .utils import human_bytes, normalize_prefix
+from .utils import human_bytes, iter_files, normalize_prefix, should_include
 from .watch import watch
 
 app = typer.Typer(add_completion=False, help="Redis-backed ranked search for your workspace.")
@@ -45,6 +46,23 @@ def _format_bytes_for_unit(num_bytes: int | None, size_unit: str) -> str:
     if unit == "bytes":
         return f"{int(num_bytes)}B"
     return f"{float(num_bytes) / float(factor):.2f}{unit.upper()}"
+
+
+def _count_index_candidates(paths: List[Path], include: List[str], exclude: List[str], max_bytes: int) -> int:
+    total = 0
+    for path in iter_files(paths):
+        if not should_include(path, include, exclude):
+            continue
+        if not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > max_bytes:
+            continue
+        total += 1
+    return total
 
 
 @app.callback()
@@ -109,11 +127,50 @@ def index(
     client = get_client(cfg.redis_url)
     deleted = 0
     if cfg.drop:
-        deleted = drop_namespace(client, cfg.prefix)
-        if not json_output:
+        if json_output:
+            deleted = drop_namespace(client, cfg.prefix)
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True,
+            ) as progress:
+                task = progress.add_task("Dropping existing namespace...", total=None)
+                deleted = drop_namespace(client, cfg.prefix)
+                progress.update(task, description="Drop complete")
             console.print(f"Dropped {deleted} keys under {normalize_prefix(cfg.prefix)}")
 
-    indexed = index_paths(client, existing_paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
+    indexed = 0
+    if json_output:
+        indexed = index_paths(client, existing_paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
+    else:
+        total_candidates = _count_index_candidates(existing_paths, cfg.include, cfg.exclude, cfg.max_bytes)
+        if total_candidates > 0:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Indexing files...", total=total_candidates)
+
+                def _on_processed(_path: Path, _indexed: bool) -> None:
+                    progress.advance(task, 1)
+
+                indexed = index_paths(
+                    client,
+                    existing_paths,
+                    cfg.include,
+                    cfg.exclude,
+                    cfg.max_bytes,
+                    cfg.prefix,
+                    on_file_processed=_on_processed,
+                )
+        else:
+            indexed = index_paths(client, existing_paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
     if json_output:
         _print_json(
             {
@@ -309,16 +366,39 @@ def prune(
     root: Path = typer.Argument(..., help="Root to prune missing docs under."),
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show deletions without removing."),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
+    missing_docs = list_missing_docs(client, root, prefix)
+    if dry_run:
+        if json_output:
+            _print_json(
+                {
+                    "command": "prune",
+                    "root": str(root),
+                    "dry_run": True,
+                    "would_remove_docs": len(missing_docs),
+                    "documents": [str(p) for p in missing_docs],
+                }
+            )
+            raise typer.Exit()
+        if not missing_docs:
+            console.print("Dry run: no documents would be pruned.")
+            raise typer.Exit()
+        console.print(f"Dry run: would prune {len(missing_docs)} documents:")
+        for doc_path in missing_docs:
+            console.print(f"- {doc_path}")
+        raise typer.Exit()
+
     removed = prune_missing(client, root, prefix)
     if json_output:
         _print_json(
             {
                 "command": "prune",
                 "root": str(root),
+                "dry_run": False,
                 "removed_docs": removed,
             }
         )
