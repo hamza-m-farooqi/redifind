@@ -116,3 +116,18 @@ def test_query_json_explain(monkeypatch):
     assert payload["results"][0]["doc_id"] == "/tmp/a.py"
     assert payload["explain"]["total_docs"] == 3
     assert payload["explain"]["term_weights"][0]["term"] == "redis"
+
+
+def test_index_missing_paths_errors_json(monkeypatch):
+    # Should fail before preflight/client access when all inputs are missing.
+    monkeypatch.setattr("redifind.cli.ensure_redis_ready", lambda redis_url: None)
+    monkeypatch.setattr("redifind.cli.get_client", lambda redis_url: object())
+
+    result = runner.invoke(app, ["index", "/definitely/missing/path", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["command"] == "index"
+    assert payload["ok"] is False
+    assert payload["error"] == "No input paths exist."
+    assert payload["missing_paths"]

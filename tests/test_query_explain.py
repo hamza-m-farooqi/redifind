@@ -18,9 +18,10 @@ class FakeRedis:
     def zcard(self, key):
         return len(self.zsets.get(key, {}))
 
-    def zunionstore(self, dest, keys, weights):
+    def zunionstore(self, dest, keys):
         out = {}
-        for key, weight in zip(keys, weights):
+        key_items = keys.items() if isinstance(keys, dict) else [(key, 1.0) for key in keys]
+        for key, weight in key_items:
             for member, score in self.zsets.get(key, {}).items():
                 out[member] = out.get(member, 0.0) + float(score) * float(weight)
         self.zsets[dest] = out

@@ -80,6 +80,30 @@ def index(
     drop: bool = typer.Option(False, "--drop", help="Drop namespace before indexing."),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
+    resolved_paths = [p.resolve() for p in paths]
+    existing_paths = [p for p in resolved_paths if p.exists()]
+    missing_paths = [str(p) for p in resolved_paths if not p.exists()]
+
+    if not existing_paths:
+        if json_output:
+            _print_json(
+                {
+                    "command": "index",
+                    "ok": False,
+                    "error": "No input paths exist.",
+                    "missing_paths": missing_paths,
+                }
+            )
+        else:
+            console.print("No input paths exist.")
+            for missing in missing_paths:
+                console.print(f"- missing: {missing}")
+        raise typer.Exit(code=1)
+
+    if missing_paths and not json_output:
+        for missing in missing_paths:
+            console.print(f"Skipping missing path: {missing}")
+
     cfg = IndexConfig(include=include, exclude=exclude, max_bytes=max_bytes, redis_url=redis_url, prefix=prefix, drop=drop)
     ensure_redis_ready(cfg.redis_url)
     client = get_client(cfg.redis_url)
@@ -89,12 +113,13 @@ def index(
         if not json_output:
             console.print(f"Dropped {deleted} keys under {normalize_prefix(cfg.prefix)}")
 
-    indexed = index_paths(client, paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
+    indexed = index_paths(client, existing_paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
     if json_output:
         _print_json(
             {
                 "command": "index",
-                "paths": [str(p) for p in paths],
+                "paths": [str(p) for p in existing_paths],
+                "missing_paths": missing_paths,
                 "prefix": normalize_prefix(cfg.prefix),
                 "dropped_keys": deleted,
                 "indexed_docs": indexed,

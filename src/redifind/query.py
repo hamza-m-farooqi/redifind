@@ -121,10 +121,11 @@ def _rank_candidates(
     offset: int,
 ) -> list[tuple[str, float]]:
     term_keys = [_term_key(prefix, t) for t in terms]
-    weights = [float(term_stats[t]["idf"]) for t in terms]
+    weighted_keys = {key: float(term_stats[term]["idf"]) for key, term in zip(term_keys, terms)}
 
     temp_key = f"{prefix}tmp:query:{int(time.time() * 1000)}"
-    client.zunionstore(temp_key, term_keys, weights=weights)
+    # Redis client compatibility: pass {key: weight} mapping instead of weights kwarg.
+    client.zunionstore(temp_key, weighted_keys)
     candidates = client.zrevrange(temp_key, offset, offset + top + 50, withscores=True)
     client.delete(temp_key)
     return [(doc_id, float(score)) for doc_id, score in candidates]
