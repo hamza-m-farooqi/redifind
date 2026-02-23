@@ -11,6 +11,9 @@ from redis import Redis
 from .tokenizer import doc_filter_tokens, tokenize_text
 from .utils import iter_files, normalize_prefix, should_include
 
+_BINARY_SAMPLE_BYTES = 8192
+_TEXT_BYTE_WHITELIST = set(b"\n\r\t\f\b")
+
 
 @dataclass(frozen=True)
 class IndexedDoc:
@@ -38,6 +41,25 @@ def _term_key(prefix: str, token: str) -> str:
 
 def _indexed_key(prefix: str) -> str:
     return f"{prefix}indexed"
+
+
+def _looks_binary(data: bytes, sample_size: int = _BINARY_SAMPLE_BYTES) -> bool:
+    sample = data[:sample_size]
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+
+    non_text = 0
+    for byte in sample:
+        if byte in _TEXT_BYTE_WHITELIST:
+            continue
+        if 32 <= byte <= 126:
+            continue
+        if 128 <= byte <= 255:
+            continue
+        non_text += 1
+    return (non_text / len(sample)) > 0.30
 
 
 def drop_namespace(client: Redis, prefix: str) -> int:
@@ -78,6 +100,8 @@ def index_paths(
         try:
             data = path.read_bytes()
         except OSError:
+            continue
+        if _looks_binary(data):
             continue
 
         text = None

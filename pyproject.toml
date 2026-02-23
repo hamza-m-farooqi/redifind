@@ -1,6 +1,6 @@
 [project]
 name = "redifind"
-version = "0.1.1"
+version = "0.1.2"
 description = "Redis-backed ranked search for your workspace"
 readme = "README.md"
 requires-python = ">=3.10"
