@@ -1,3 +1,5 @@
+import os
+import time
 from pathlib import Path
 
 from redifind.indexer import _looks_binary, index_paths
@@ -54,6 +56,10 @@ class FakeRedis:
     def pipeline(self):
         return _Pipeline(self)
 
+    def hmget(self, key, fields):
+        data = self.hashes.get(key, {})
+        return [data.get(field) for field in fields]
+
 
 def test_looks_binary_detects_nul_bytes():
     assert _looks_binary(b"abc\x00def")
@@ -74,3 +80,29 @@ def test_index_paths_skips_binary_files(tmp_path: Path):
     assert str(text_file.resolve()) in indexed_docs
     assert str(binary_file.resolve()) not in indexed_docs
 
+
+def test_index_paths_skips_unchanged_files(tmp_path: Path):
+    file_path = tmp_path / "same.py"
+    file_path.write_text("def keep():\n    return 1\n")
+    client = FakeRedis()
+
+    first = index_paths(client, [tmp_path], ["**/*"], [], 2_000_000, "rsearch:")
+    second = index_paths(client, [tmp_path], ["**/*"], [], 2_000_000, "rsearch:")
+
+    assert first == 1
+    assert second == 0
+
+
+def test_index_paths_skips_when_only_mtime_changes(tmp_path: Path):
+    file_path = tmp_path / "touch.py"
+    file_path.write_text("def stable():\n    return 7\n")
+    client = FakeRedis()
+
+    first = index_paths(client, [tmp_path], ["**/*"], [], 2_000_000, "rsearch:")
+
+    later = int(time.time()) + 2
+    os.utime(file_path, (later, later))
+    second = index_paths(client, [tmp_path], ["**/*"], [], 2_000_000, "rsearch:")
+
+    assert first == 1
+    assert second == 0

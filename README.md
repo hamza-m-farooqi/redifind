@@ -26,6 +26,7 @@ Core trick:
 ## Features (MVP)
 
 - Index a directory of files (code + docs)
+- Incremental indexing: unchanged files are skipped using stored `mtime`/`size` and `sha1`
 - Ranked search (TF/IDF-ish) with Redis ZSET unions
 - Filters and facets using special tokens (`ext:py`, `path:src/`)
 - Required (`+term`) and excluded (`-term`) terms
@@ -138,6 +139,7 @@ Options:
 Notes:
 - human output now shows a Rich progress bar while indexing
 - when `--drop` is set, drop progress is shown before indexing starts
+- unchanged files are skipped automatically using stored metadata/hash checks
 
 Examples:
 

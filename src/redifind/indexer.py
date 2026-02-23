@@ -43,6 +43,15 @@ def _indexed_key(prefix: str) -> str:
     return f"{prefix}indexed"
 
 
+def _to_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _looks_binary(data: bytes, sample_size: int = _BINARY_SAMPLE_BYTES) -> bool:
     sample = data[:sample_size]
     if not sample:
@@ -93,11 +102,31 @@ def index_paths(
         if not path.is_file():
             continue
         try:
-            size = path.stat().st_size
+            stat = path.stat()
         except OSError:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
             continue
+        size = int(stat.st_size)
         if size > max_bytes:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
             continue
+        mtime = int(stat.st_mtime)
+        resolved = path.resolve()
+        doc_id = str(resolved)
+        doc_key = _doc_key(prefix, doc_id)
+
+        prev_mtime_raw, prev_size_raw, prev_sha1_raw = client.hmget(doc_key, ["mtime", "size", "sha1"])
+        prev_mtime = _to_int(prev_mtime_raw)
+        prev_size = _to_int(prev_size_raw)
+        prev_sha1 = str(prev_sha1_raw) if prev_sha1_raw else None
+
+        if prev_sha1 and prev_mtime == mtime and prev_size == size:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
+            continue
+
         try:
             data = path.read_bytes()
         except OSError:
@@ -108,17 +137,17 @@ def index_paths(
             if on_file_processed is not None:
                 on_file_processed(path, False)
             continue
+        sha1 = _sha1_bytes(data)
+        if prev_sha1 and prev_sha1 == sha1:
+            if on_file_processed is not None:
+                on_file_processed(path, False)
+            continue
 
         text = None
         try:
             text = data.decode("utf-8", errors="ignore")
         except Exception:
             text = ""
-
-        resolved = path.resolve()
-        doc_id = str(resolved)
-        mtime = int(path.stat().st_mtime)
-        sha1 = _sha1_bytes(data)
 
         tokens = tokenize_text(text)
         rel_path = None
