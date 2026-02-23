@@ -23,6 +23,10 @@ app = typer.Typer(add_completion=False, help="Redis-backed ranked search for you
 console = Console()
 
 
+def _print_json(payload: dict) -> None:
+    console.print(json.dumps(payload, indent=2))
+
+
 @app.callback()
 def _main(
     ctx: typer.Context,
@@ -54,15 +58,30 @@ def index(
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
     drop: bool = typer.Option(False, "--drop", help="Drop namespace before indexing."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     cfg = IndexConfig(include=include, exclude=exclude, max_bytes=max_bytes, redis_url=redis_url, prefix=prefix, drop=drop)
     ensure_redis_ready(cfg.redis_url)
     client = get_client(cfg.redis_url)
+    deleted = 0
     if cfg.drop:
         deleted = drop_namespace(client, cfg.prefix)
-        console.print(f"Dropped {deleted} keys under {normalize_prefix(cfg.prefix)}")
+        if not json_output:
+            console.print(f"Dropped {deleted} keys under {normalize_prefix(cfg.prefix)}")
 
     indexed = index_paths(client, paths, cfg.include, cfg.exclude, cfg.max_bytes, cfg.prefix)
+    if json_output:
+        _print_json(
+            {
+                "command": "index",
+                "paths": [str(p) for p in paths],
+                "prefix": normalize_prefix(cfg.prefix),
+                "dropped_keys": deleted,
+                "indexed_docs": indexed,
+            }
+        )
+        raise typer.Exit()
+
     console.print(f"Indexed {indexed} documents.")
 
 
@@ -125,17 +144,46 @@ def show(
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
     query_text: Optional[str] = typer.Option(None, "--query", help="Optional query for snippet context."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
     doc_key = f"{normalize_prefix(prefix)}doc:{str(doc_id.resolve())}"
     meta = client.hgetall(doc_key)
     if not meta:
+        if json_output:
+            _print_json({"command": "show", "doc_id": str(doc_id), "found": False})
+            raise typer.Exit(code=1)
         console.print("Document not found in index.")
         raise typer.Exit(code=1)
 
     size = int(meta.get("size", 0))
     mtime = meta.get("mtime", "")
+    snippet_plain: Optional[str] = None
+    snippet_rich = None
+    if query_text:
+        snippet = snippet_for(Path(meta.get("path")), query_text)
+        if snippet.plain:
+            snippet_plain = snippet.plain
+            snippet_rich = snippet
+
+    if json_output:
+        _print_json(
+            {
+                "command": "show",
+                "doc_id": str(doc_id),
+                "found": True,
+                "meta": {
+                    "path": meta.get("path"),
+                    "size": size,
+                    "mtime": mtime,
+                    "sha1": meta.get("sha1"),
+                },
+                "snippet": snippet_plain,
+            }
+        )
+        raise typer.Exit()
+
     panel = Panel(
         f"[bold]{meta.get('path')}[/bold]\n"
         f"size: {human_bytes(size)}\n"
@@ -145,10 +193,8 @@ def show(
     )
     console.print(panel)
 
-    if query_text:
-        snippet = snippet_for(Path(meta.get("path")), query_text)
-        if snippet.plain:
-            console.print(Panel(snippet, title="Snippet", box=box.SIMPLE))
+    if snippet_rich is not None:
+        console.print(Panel(snippet_rich, title="Snippet", box=box.SIMPLE))
 
 
 @app.command()
@@ -156,10 +202,20 @@ def remove(
     paths: List[Path] = typer.Argument(..., help="Paths to remove from index."),
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
     removed = remove_docs(client, paths, prefix)
+    if json_output:
+        _print_json(
+            {
+                "command": "remove",
+                "paths": [str(p) for p in paths],
+                "removed_docs": removed,
+            }
+        )
+        raise typer.Exit()
     console.print(f"Removed {removed} documents.")
 
 
@@ -168,10 +224,20 @@ def prune(
     root: Path = typer.Argument(..., help="Root to prune missing docs under."),
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
     removed = prune_missing(client, root, prefix)
+    if json_output:
+        _print_json(
+            {
+                "command": "prune",
+                "root": str(root),
+                "removed_docs": removed,
+            }
+        )
+        raise typer.Exit()
     console.print(f"Pruned {removed} documents.")
 
 
@@ -179,10 +245,15 @@ def prune(
 def stats(
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
     data = index_stats(client, prefix)
+    if json_output:
+        _print_json({"command": "stats", "prefix": normalize_prefix(prefix), "stats": data})
+        raise typer.Exit()
+
     table = Table(box=box.SIMPLE_HEAVY)
     table.add_column("Metric", style="bold")
     table.add_column("Value")
@@ -193,8 +264,27 @@ def stats(
 @app.command()
 def doctor(
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     status = get_preflight_status(redis_url)
+    if json_output:
+        ok = bool(status.is_linux and status.redis_reachable)
+        _print_json(
+            {
+                "command": "doctor",
+                "ok": ok,
+                "checks": {
+                    "is_linux": status.is_linux,
+                    "redis_reachable": status.redis_reachable,
+                    "installer": status.installer,
+                },
+                "redis_url": redis_url,
+            }
+        )
+        if not ok:
+            raise typer.Exit(code=1)
+        raise typer.Exit()
+
     table = Table(title="redifind doctor", box=box.SIMPLE_HEAVY)
     table.add_column("Check", style="bold")
     table.add_column("Status")
@@ -216,10 +306,24 @@ def watch_cmd(
     max_bytes: int = typer.Option(2_000_000, "--max-bytes", help="Skip files larger than this."),
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
-    console.print(f"Watching {root}...")
+    if json_output:
+        _print_json(
+            {
+                "command": "watch",
+                "root": str(root),
+                "include": include,
+                "exclude": exclude,
+                "max_bytes": max_bytes,
+                "prefix": normalize_prefix(prefix),
+                "status": "watching",
+            }
+        )
+    else:
+        console.print(f"Watching {root}...")
     watch(client, root, include, exclude, max_bytes, prefix)
 
 

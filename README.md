@@ -131,6 +131,7 @@ Options:
 - `--redis <url>`: Redis URL (default: redis://localhost:6379/0)
 - `--prefix <ns>`: namespace prefix for all keys (default: rsearch:)
 - `--drop`: drop existing index namespace before indexing
+- `--json`: output structured JSON
 
 Examples:
 
@@ -173,11 +174,18 @@ Print document metadata + a snippet preview.
 
 In other ingestion modes you could use UUIDs; MVP uses full path.
 
+Options:
+- `--query <text>`: optional query for snippet context
+- `--json`: output structured JSON
+
 ---
 
 ### `redifind remove <PATH...>`
 
 Remove documents from the index (by file path).
+
+Options:
+- `--json`: output structured JSON
 
 ---
 
@@ -185,17 +193,26 @@ Remove documents from the index (by file path).
 
 Remove indexed docs that no longer exist on disk under ROOT.
 
+Options:
+- `--json`: output structured JSON
+
 ---
 
 ### `redifind stats`
 
 Show index stats (doc count).
 
+Options:
+- `--json`: output structured JSON
+
 ---
 
 ### `redifind doctor`
 
 Run environment checks (Linux + Redis reachability).
+
+Options:
+- `--json`: output structured JSON
 
 ---
 
@@ -206,6 +223,9 @@ Watch a directory and auto-update the index on file changes.
 Notes:
 - Uses filesystem events
 - Debounces rapid saves (future enhancement)
+
+Options:
+- `--json`: output structured JSON startup payload
 
 ---
 
