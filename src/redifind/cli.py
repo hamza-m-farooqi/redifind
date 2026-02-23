@@ -13,7 +13,7 @@ from rich.table import Table
 from .config import IndexConfig, QueryConfig, WatchConfig
 from .indexer import drop_namespace, index_paths, index_stats, prune_missing, remove_docs
 from .preflight import ensure_redis_ready, get_preflight_status
-from .query import run_query
+from .query import run_query, run_query_explain
 from .redis_client import get_client
 from .snippets import snippet_for
 from .utils import human_bytes, normalize_prefix
@@ -91,6 +91,7 @@ def query(
     top: int = typer.Option(10, "--top", help="Number of results."),
     offset: int = typer.Option(0, "--offset", help="Offset for pagination."),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
+    explain: bool = typer.Option(False, "--explain", help="Show term weights and scoring breakdown."),
     with_scores: bool = typer.Option(False, "--with-scores", help="Include scores in output."),
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
@@ -105,7 +106,12 @@ def query(
     )
     ensure_redis_ready(cfg.redis_url)
     client = get_client(cfg.redis_url)
-    results = run_query(client, query_text, cfg.top, cfg.offset, cfg.prefix)
+    explain_payload = None
+    if explain:
+        explain_payload = run_query_explain(client, query_text, cfg.top, cfg.offset, cfg.prefix)
+        results = [(item["doc_id"], float(item["score"])) for item in explain_payload["results"]]
+    else:
+        results = run_query(client, query_text, cfg.top, cfg.offset, cfg.prefix)
 
     if cfg.json_output:
         payload = {
@@ -117,6 +123,12 @@ def query(
                 for doc_id, score in results
             ],
         }
+        if explain_payload is not None:
+            payload["explain"] = {
+                "total_docs": explain_payload["total_docs"],
+                "term_weights": explain_payload["term_weights"],
+                "results": explain_payload["results"],
+            }
         console.print(json.dumps(payload, indent=2))
         raise typer.Exit()
 
@@ -136,6 +148,34 @@ def query(
         else:
             table.add_row(str(i), doc_id)
     console.print(table)
+
+    if explain_payload is not None:
+        weights = Table(title="Explain: term weights", box=box.SIMPLE_HEAVY)
+        weights.add_column("Term", style="bold")
+        weights.add_column("Count", justify="right")
+        weights.add_column("DF", justify="right")
+        weights.add_column("IDF", justify="right")
+        for item in explain_payload["term_weights"]:
+            weights.add_row(
+                str(item["term"]),
+                str(item["count"]),
+                str(item["df"]),
+                f"{float(item['idf']):.3f}",
+            )
+        console.print(weights)
+
+        for item in explain_payload["results"]:
+            parts = []
+            for contrib in item["contributions"]:
+                value = float(contrib["value"])
+                if value <= 0:
+                    continue
+                parts.append(
+                    f"{contrib['term']}: value={value:.3f} (tf={float(contrib['tf']):.3f}, "
+                    f"idf={float(contrib['idf']):.3f}, count={int(contrib['count'])})"
+                )
+            body = "\n".join(parts) if parts else "No positive contributions."
+            console.print(Panel(body, title=f"Explain: {item['doc_id']}", box=box.SIMPLE))
 
 
 @app.command()

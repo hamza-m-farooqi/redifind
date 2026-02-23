@@ -29,8 +29,9 @@ Core trick:
 - Ranked search (TF/IDF-ish) with Redis ZSET unions
 - Filters and facets using special tokens (`ext:py`, `path:src/`)
 - Required (`+term`) and excluded (`-term`) terms
-- Snippet previews (basic)
-- JSON output for integrations
+- Snippet previews with query-term highlighting and fixed-width context windows
+- Structured JSON output across all primary commands (`index`, `query`, `show`, `remove`, `prune`, `stats`, `doctor`, `watch`)
+- Query explain mode (`query --explain`) with DF/IDF term weights and per-result score contributions
 - Namespace isolation via `--prefix` so you can run multiple indexes in one Redis
 
 ---
@@ -155,6 +156,7 @@ Options:
 - `--top <n>`: number of results (default 10)
 - `--offset <n>`: pagination offset (default 0)
 - `--json`: output JSON
+- `--explain`: show term DF/IDF weights and per-result score breakdown
 - `--with-scores`: show numeric scores
 
 Examples:
@@ -162,6 +164,8 @@ Examples:
 ```bash
 redifind query "rate limit +redis -memcached ext:md" --top 20
 redifind query "deployment path:infra/ ext:yml"
+redifind query "redis pipeline ext:py" --explain --with-scores
+redifind query "redis pipeline ext:py" --json --explain
 ```
 
 ---
@@ -177,6 +181,9 @@ In other ingestion modes you could use UUIDs; MVP uses full path.
 Options:
 - `--query <text>`: optional query for snippet context
 - `--json`: output structured JSON
+
+Notes:
+- With `--query`, snippet output highlights matched query terms in the terminal.
 
 ---
 
@@ -241,6 +248,21 @@ Options:
    ... zunionstore combines TF scores and applies IDF weights ...
 ```
 
+### Human explain output (`query --explain`)
+
+```
+┏━━━━━━━━━━┳━━━━━━━┳━━━━┳━━━━━━━┓
+┃ Term     ┃ Count ┃ DF ┃ IDF   ┃
+┡━━━━━━━━━━╇━━━━━━━╇━━━━╇━━━━━━━┩
+│ redis    │ 1     │ 42 │ 0.251 │
+│ pipeline │ 1     │ 13 │ 1.943 │
+└──────────┴───────┴────┴───────┘
+
+Explain: /abs/path/src/app.py
+pipeline: value=0.583 (tf=0.300, idf=1.943, count=1)
+redis: value=0.126 (tf=0.500, idf=0.251, count=1)
+```
+
 ### JSON output (`--json`)
 
 ```json
@@ -252,6 +274,40 @@ Options:
     {"doc_id": "/abs/path/src/app.py", "score": 2.884, "path": "/abs/path/src/app.py"},
     {"doc_id": "/abs/path/src/cache.py", "score": 2.102, "path": "/abs/path/src/cache.py"}
   ]
+}
+```
+
+### JSON explain output (`query --json --explain`)
+
+```json
+{
+  "query": "redis pipeline ext:py",
+  "offset": 0,
+  "count": 10,
+  "results": [
+    {
+      "doc_id": "/abs/path/src/app.py",
+      "score": 0.709,
+      "path": "/abs/path/src/app.py"
+    }
+  ],
+  "explain": {
+    "total_docs": 250,
+    "term_weights": [
+      {"term": "redis", "df": 42, "idf": 0.251, "count": 1},
+      {"term": "pipeline", "df": 13, "idf": 1.943, "count": 1}
+    ],
+    "results": [
+      {
+        "doc_id": "/abs/path/src/app.py",
+        "score": 0.709,
+        "contributions": [
+          {"term": "pipeline", "count": 1, "tf": 0.3, "idf": 1.943, "value": 0.583},
+          {"term": "redis", "count": 1, "tf": 0.5, "idf": 0.251, "value": 0.126}
+        ]
+      }
+    ]
+  }
 }
 ```
 

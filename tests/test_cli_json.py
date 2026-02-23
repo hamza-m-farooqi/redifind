@@ -64,3 +64,32 @@ def test_doctor_json_failure_exit(monkeypatch):
     assert payload["command"] == "doctor"
     assert payload["ok"] is False
     assert payload["checks"]["redis_reachable"] is False
+
+
+def test_query_json_explain(monkeypatch):
+    monkeypatch.setattr("redifind.cli.ensure_redis_ready", lambda redis_url: None)
+    monkeypatch.setattr("redifind.cli.get_client", lambda redis_url: object())
+    monkeypatch.setattr(
+        "redifind.cli.run_query_explain",
+        lambda client, query_text, top, offset, prefix: {
+            "total_docs": 3,
+            "term_weights": [{"term": "redis", "df": 2, "idf": 0.585, "count": 1}],
+            "results": [
+                {
+                    "doc_id": "/tmp/a.py",
+                    "score": 0.41,
+                    "contributions": [
+                        {"term": "redis", "count": 1, "tf": 0.7, "idf": 0.585, "value": 0.4095}
+                    ],
+                }
+            ],
+        },
+    )
+
+    result = runner.invoke(app, ["query", "redis", "--json", "--explain"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["results"][0]["doc_id"] == "/tmp/a.py"
+    assert payload["explain"]["total_docs"] == 3
+    assert payload["explain"]["term_weights"][0]["term"] == "redis"
