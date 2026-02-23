@@ -193,6 +193,7 @@ Remove documents from the index (by file path).
 
 Options:
 - `--json`: output structured JSON
+- `--size-unit <auto|bytes|kb|mb|gb>`: choose size display units for indexed/Redis memory values
 
 ---
 
@@ -207,7 +208,11 @@ Options:
 
 ### `redifind stats`
 
-Show index stats (doc count).
+Show index stats:
+- `docs`
+- `total_terms` (unique indexed term keys, including filter tokens)
+- `indexed_size_bytes_approx` and humanized size
+- Redis memory usage (`used_memory`, `used_memory_human`) when available
 
 Options:
 - `--json`: output structured JSON

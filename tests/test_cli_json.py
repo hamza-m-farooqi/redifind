@@ -24,6 +24,29 @@ def test_stats_json(monkeypatch):
     assert payload["stats"]["docs"] == 7
 
 
+def test_stats_json_size_unit(monkeypatch):
+    monkeypatch.setattr("redifind.cli.ensure_redis_ready", lambda redis_url: None)
+    monkeypatch.setattr("redifind.cli.get_client", lambda redis_url: object())
+    monkeypatch.setattr(
+        "redifind.cli.index_stats",
+        lambda client, prefix: {
+            "docs": 1,
+            "total_terms": 3,
+            "indexed_size_bytes_approx": 3 * 1024 * 1024,
+            "redis_memory_used_bytes": 5 * 1024 * 1024,
+            "redis_memory_used_human": "5.00M",
+        },
+    )
+
+    result = runner.invoke(app, ["stats", "--json", "--size-unit", "mb"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["display"]["size_unit"] == "mb"
+    assert payload["display"]["indexed_size"] == "3.00MB"
+    assert payload["display"]["redis_memory"] == "5.00MB"
+
+
 def test_show_json(monkeypatch, tmp_path: Path):
     file_path = tmp_path / "doc.txt"
     file_path.write_text("hello redis world")

@@ -27,6 +27,26 @@ def _print_json(payload: dict) -> None:
     console.print(json.dumps(payload, indent=2))
 
 
+def _format_bytes_for_unit(num_bytes: int | None, size_unit: str) -> str:
+    if num_bytes is None:
+        return "n/a"
+    unit = size_unit.lower()
+    if unit == "auto":
+        return human_bytes(int(num_bytes))
+    factors = {
+        "bytes": 1,
+        "kb": 1024,
+        "mb": 1024 * 1024,
+        "gb": 1024 * 1024 * 1024,
+    }
+    if unit not in factors:
+        raise typer.BadParameter("size-unit must be one of: auto, bytes, kb, mb, gb")
+    factor = factors[unit]
+    if unit == "bytes":
+        return f"{int(num_bytes)}B"
+    return f"{float(num_bytes) / float(factor):.2f}{unit.upper()}"
+
+
 @app.callback()
 def _main(
     ctx: typer.Context,
@@ -285,19 +305,44 @@ def prune(
 def stats(
     redis_url: str = typer.Option("redis://localhost:6379/0", "--redis", help="Redis URL."),
     prefix: str = typer.Option("rsearch:", "--prefix", help="Namespace prefix for keys."),
+    size_unit: str = typer.Option("auto", "--size-unit", help="Display size unit: auto, bytes, kb, mb, gb."),
     json_output: bool = typer.Option(False, "--json", help="Output JSON."),
 ):
     ensure_redis_ready(redis_url)
     client = get_client(redis_url)
     data = index_stats(client, prefix)
+    size_bytes = int(data.get("indexed_size_bytes_approx", 0) or 0)
+    redis_mem_bytes_raw = data.get("redis_memory_used_bytes")
+    redis_mem_bytes = int(redis_mem_bytes_raw) if redis_mem_bytes_raw is not None else None
+    indexed_size_display = _format_bytes_for_unit(size_bytes, size_unit)
+    redis_mem_display = _format_bytes_for_unit(redis_mem_bytes, size_unit)
     if json_output:
-        _print_json({"command": "stats", "prefix": normalize_prefix(prefix), "stats": data})
+        _print_json(
+            {
+                "command": "stats",
+                "prefix": normalize_prefix(prefix),
+                "stats": data,
+                "display": {
+                    "size_unit": size_unit.lower(),
+                    "indexed_size": indexed_size_display,
+                    "redis_memory": redis_mem_display,
+                },
+            }
+        )
         raise typer.Exit()
 
     table = Table(box=box.SIMPLE_HEAVY)
     table.add_column("Metric", style="bold")
     table.add_column("Value")
     table.add_row("docs", str(data.get("docs", 0)))
+    table.add_row("total_terms", str(data.get("total_terms", 0)))
+    table.add_row("indexed_size_bytes_approx", str(size_bytes))
+    table.add_row(f"indexed_size_{size_unit.lower()}_approx", indexed_size_display)
+    mem_bytes = redis_mem_bytes_raw
+    mem_human = data.get("redis_memory_used_human")
+    table.add_row("redis_memory_used_bytes", str(mem_bytes) if mem_bytes is not None else "n/a")
+    table.add_row("redis_memory_used_human", str(mem_human) if mem_human is not None else "n/a")
+    table.add_row(f"redis_memory_used_{size_unit.lower()}", redis_mem_display)
     console.print(table)
 
 

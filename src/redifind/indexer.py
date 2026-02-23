@@ -4,7 +4,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from redis import Redis
 
@@ -173,9 +173,53 @@ def prune_missing(client: Redis, root: Path, prefix: str) -> int:
     return remove_docs(client, missing, prefix)
 
 
-def index_stats(client: Redis, prefix: str) -> dict[str, int]:
+def _count_term_keys(client: Redis, prefix: str) -> int:
+    cursor = 0
+    total = 0
+    pattern = f"{prefix}term:*"
+    while True:
+        cursor, keys = client.scan(cursor=cursor, match=pattern, count=500)
+        total += len(keys)
+        if cursor == 0:
+            break
+    return total
+
+
+def _approx_indexed_size_bytes(client: Redis, prefix: str) -> int:
+    doc_ids = client.smembers(_indexed_key(prefix))
+    if not doc_ids:
+        return 0
+    pipe = client.pipeline()
+    for doc_id in doc_ids:
+        pipe.hget(_doc_key(prefix, doc_id), "size")
+    sizes = pipe.execute()
+    total = 0
+    for size in sizes:
+        try:
+            total += int(size or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _redis_memory_info(client: Redis) -> dict[str, Any]:
+    try:
+        info = client.info("memory")
+    except Exception:
+        return {"redis_memory_used_bytes": None, "redis_memory_used_human": None}
+    return {
+        "redis_memory_used_bytes": info.get("used_memory"),
+        "redis_memory_used_human": info.get("used_memory_human"),
+    }
+
+
+def index_stats(client: Redis, prefix: str) -> dict[str, Any]:
     prefix = normalize_prefix(prefix)
     indexed_count = client.scard(_indexed_key(prefix))
-    return {
+    stats = {
         "docs": int(indexed_count),
+        "total_terms": int(_count_term_keys(client, prefix)),
+        "indexed_size_bytes_approx": int(_approx_indexed_size_bytes(client, prefix)),
     }
+    stats.update(_redis_memory_info(client))
+    return stats
