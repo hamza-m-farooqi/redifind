@@ -4,6 +4,24 @@ version = "0.1.0"
 description = "Redis-backed ranked search for your workspace"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Hamza Muhammad Farooqi", email = "hamzamfarooqi@gmail.com" },
+]
+keywords = ["redis", "search", "cli", "indexing", "tfidf", "ranking"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Utilities",
+]
 dependencies = [
   "redis>=5.0",
   "rich>=13.7",
@@ -15,6 +33,11 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hamza-m-farooqi/redifind"
+Repository = "https://github.com/hamza-m-farooqi/redifind"
+Issues = "https://github.com/hamza-m-farooqi/redifind/issues"
 
 [project.scripts]
 redifind = "redifind.cli:app"
