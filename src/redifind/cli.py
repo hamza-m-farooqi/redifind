@@ -147,7 +147,7 @@ def show(
 
     if query_text:
         snippet = snippet_for(Path(meta.get("path")), query_text)
-        if snippet:
+        if snippet.plain:
             console.print(Panel(snippet, title="Snippet", box=box.SIMPLE))
 
 
